@@ -17,7 +17,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "ext4_rs"
 version = "0.1.0"
-source = "git+https://github.com/yuoo655/ext4_rs.git#0d23c28f7742b5ad201340df45015fbc62324d9f"
+source = "git+https://github.com/yuoo655/ext4_rs.git#8e3db870ee936bfc87a81b35b7ffdf7aa234884a"
 dependencies = [
  "bitflags",
  "byteorder",
