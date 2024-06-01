@@ -92,16 +92,9 @@ mod tests {
         }
     }
 
-    fn setup() {
-        let _ = Command::new("sh")
-            .arg("gen_img.sh")
-            .output()
-            .expect("Failed to gen test image");
-    }
-
     #[test]
     fn test_open() {
-        setup();
+
 
         let disk = Arc::new(Disk {});
         let ext4 = Ext4::open(disk);
@@ -134,11 +127,11 @@ mod tests {
         let mut ext4_file = Ext4File::new();
         let r = ext4.ext4_open_new(&mut ext4_file, path, "r+", false);
         assert!(r.is_err());
+
     }
 
     #[test]
     fn test_read_file() {
-        setup();
 
         let disk = Arc::new(Disk {});
         let ext4 = Ext4::open(disk);
@@ -155,11 +148,12 @@ mod tests {
         assert!(r.is_ok(), "open file error {:?}", r.err());
         let data = [0x31u8; 0x100000];
         assert!(read_buf == data);
+
+
     }
 
     #[test]
     fn test_write_file() {
-        setup();
 
         
         let disk = Arc::new(Disk {});
@@ -198,5 +192,7 @@ mod tests {
             assert!(r.is_ok(), "open file error {:?}", r.err());
             assert_eq!(write_data, read_buf);
         }
+
+        // clear()
     }
 }

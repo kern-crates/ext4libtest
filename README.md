@@ -10,5 +10,5 @@
 ## 运行
 
    ```bash
-   sh 1.sh
+   sh run.sh
    ```
