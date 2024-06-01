@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 log = "0.4"
-ext4_rs = "1.0.0"
+ext4_rs = {git = "https://github.com/yuoo655/ext4_rs.git"}
 jbd2_rs = {git = "https://github.com/yuoo655/jbd2_rs.git"}

@@ -9,19 +9,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 
 [[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
-
-[[package]]
 name = "ext4_rs"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6747a137096006c31c93634fca430d14b59642dc2baaca676464ea384a262d7b"
+source = "git+https://github.com/yuoo655/ext4_rs.git#b1aabd5966a5fc4e7ca55b1ba8de4cb0aac7e8f8"
 dependencies = [
  "bitflags",
- "byteorder",
  "log",
 ]
 
