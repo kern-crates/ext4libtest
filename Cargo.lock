@@ -11,7 +11,7 @@ checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
 [[package]]
 name = "ext4_rs"
 version = "1.0.0"
-source = "git+https://github.com/yuoo655/ext4_rs.git#b1aabd5966a5fc4e7ca55b1ba8de4cb0aac7e8f8"
+source = "git+https://github.com/yuoo655/ext4_rs.git#ef6a9fff1cc504bc1565bb87a45f2962f7f8dec2"
 dependencies = [
  "bitflags",
  "log",
