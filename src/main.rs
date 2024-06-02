@@ -145,24 +145,45 @@ impl Filesystem for Ext4Fuse {
         let mut file = Ext4File::new();
         let result = self.ext4.ext4_open(&mut file, path, "r", false);
 
+        // let mut inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), file.inode as u32);
+        // let mode = inode_ref.inner.inode.mode;
+        // let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
+
+        // let file_type = match inode_type {
+        //     InodeMode::S_IFDIR => {
+        //         FileType::Directory
+        //     }
+        //     InodeMode::S_IFREG => {
+        //         FileType::RegularFile
+        //     }
+        //     /* Reset blocks array. For inode which is not directory or file, just
+        //      * fill in blocks with 0 */
+        //     _ => {
+        //         FileType::RegularFile
+        //     }
+        // };
+
         match result {
             Ok(_) => {
+
+                log::info!("open success: {:x?}", file.inode);
                 let attr = FileAttr {
                     ino: file.inode as u64,
                     size: file.fsize,
-                    blocks: (file.fsize + 511) / 512,
+                    blocks: file.fsize / BLOCK_SIZE as u64,
                     atime: UNIX_EPOCH,
                     mtime: UNIX_EPOCH,
                     ctime: UNIX_EPOCH,
                     crtime: UNIX_EPOCH,
-                    kind: FileType::RegularFile,
+                    // fix me
+                    kind: FileType::Directory,
                     perm: 0o644,
                     nlink: 1,
                     uid: 501,
                     gid: 20,
                     rdev: 0,
                     flags: 0,
-                    blksize: 512,
+                    blksize: BLOCK_SIZE as u32,
                 };
                 reply.entry(&TTL, &attr, 0);
             }
@@ -180,23 +201,38 @@ impl Filesystem for Ext4Fuse {
         log::info!("getattr: {:x?}", inode);
         let mut inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), inode as u32);
         let link_cnt = inode_ref.inner.inode.ext4_inode_get_links_cnt() as u32;
+        let mode = inode_ref.inner.inode.mode;
+        let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
+        let file_type = match inode_type {
+            InodeMode::S_IFDIR => {
+                FileType::Directory
+            }
+            InodeMode::S_IFREG => {
+                FileType::RegularFile
+            }
+            /* Reset blocks array. For inode which is not directory or file, just
+             * fill in blocks with 0 */
+            _ => {
+                FileType::RegularFile
+            }
+        };
 
         let attr = FileAttr {
             ino: inode,
             size: inode_ref.inner.inode.inode_get_size() as u64,
-            blocks: (inode_ref.inner.inode.inode_get_size() + 511) / 512,
+            blocks: inode_ref.inner.inode.inode_get_size() / BLOCK_SIZE as u64,
             atime: UNIX_EPOCH, // Example static time, adjust accordingly
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
             crtime: UNIX_EPOCH,
-            kind: FileType::Directory, // Adjust according to inode type
+            kind: file_type, // Adjust according to inode type
             perm: 0o777,               // Need a method to translate inode perms to Unix perms
             nlink: link_cnt,
             uid: 501,
             gid: 20,
             rdev: 0, // Device nodes not covered here
             flags: 0,
-            blksize: 512, // Assuming 512, adjust if using a different block size
+            blksize: BLOCK_SIZE as u32, 
         };
         reply.attr(&TTL, &attr);
     }
@@ -307,7 +343,7 @@ fn main() {
     let disk = Arc::new(Disk {});
     let ext4 = Ext4::open(disk);
     let ext4_fuse = Ext4Fuse::new(ext4);
-    let mountpoint = "./foo";
+    let mountpoint = "foo";
     let mut options = vec![
         MountOption::RW,
         MountOption::FSName("ext4_test".to_string()),
