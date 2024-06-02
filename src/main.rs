@@ -172,8 +172,8 @@ impl Filesystem for Ext4Fuse {
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         let inode = match ino {
+            // root
             1 => 2,
-            2 => 2,
             _ => ino,
         };
 
@@ -238,8 +238,8 @@ impl Filesystem for Ext4Fuse {
         mut reply: ReplyDirectory,
     ) {
         let inode = match ino {
+            // root
             1 => 2,
-            2 => 2,
             _ => ino,
         };
         log::info!("-----------readdir-----------inode {:x?}", ino);
@@ -307,7 +307,7 @@ fn main() {
     let disk = Arc::new(Disk {});
     let ext4 = Ext4::open(disk);
     let ext4_fuse = Ext4Fuse::new(ext4);
-    let mountpoint = "./tmp";
+    let mountpoint = "./foo";
     let mut options = vec![
         MountOption::RW,
         MountOption::FSName("ext4_test".to_string()),

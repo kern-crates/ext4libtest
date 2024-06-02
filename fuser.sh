@@ -1,4 +1,7 @@
 umount tmp
-gen_img.sh
+umount foo
+rm -rf foo
+mkdir foo
+sh gen_img.sh
 cargo build
-target/debug/ext4libtest ./tmp
+target/debug/ext4libtest ./foo
