@@ -143,6 +143,7 @@ dependencies = [
 [[package]]
 name = "fuser"
 version = "0.14.0"
+source = "git+https://github.com/cberner/fuser.git#99aa528056f02cbcfc5283a16c6f05643f536271"
 dependencies = [
  "libc",
  "log",
