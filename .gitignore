@@ -2,3 +2,4 @@
 test_files
 *.img
 tmp
+ext4libtest

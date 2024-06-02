@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ext4_rs = {git = "https://github.com/yuoo655/ext4_rs.git"}
+ext4_rs = {path = "/root/sync/ext4_rs"}
 jbd2_rs = {git = "https://github.com/yuoo655/jbd2_rs.git"}
 log = "0.4"
 fuser = {git = "https://github.com/cberner/fuser.git"}

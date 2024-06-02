@@ -17,6 +17,7 @@
 
 ```sh
 sh fuser.sh
+./ext4libtest foo
 ```
 
 ```sh
