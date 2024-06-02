@@ -21,6 +21,8 @@ sh fuser.sh
 
 ```sh
 # Run in another terminal.
-cd tmp
+cd foo
+ls
+cd test_fiels
 ls
 ```
