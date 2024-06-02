@@ -5,7 +5,7 @@ pub use alloc::sync::Arc;
 use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyWrite, Request,
+    ReplyEntry, ReplyOpen, ReplyWrite, Request,
 };
 use log::{Level, LevelFilter, Metadata, Record};
 
@@ -92,6 +92,45 @@ pub const EDOM: i32 = 33;
 pub const ERANGE: i32 = 34;
 pub const EWOULDBLOCK: i32 = EAGAIN;
 
+pub const S_IFIFO: u32 = 4096;
+pub const S_IFCHR: u32 = 8192;
+pub const S_IFBLK: u32 = 24576;
+pub const S_IFDIR: u32 = 16384;
+pub const S_IFREG: u32 = 32768;
+pub const S_IFLNK: u32 = 40960;
+pub const S_IFSOCK: u32 = 49152;
+pub const S_IFMT: u32 = 61440;
+pub const S_IRWXU: u32 = 448;
+pub const S_IXUSR: u32 = 64;
+pub const S_IWUSR: u32 = 128;
+pub const S_IRUSR: u32 = 256;
+pub const S_IRWXG: u32 = 56;
+pub const S_IXGRP: u32 = 8;
+pub const S_IWGRP: u32 = 16;
+pub const S_IRGRP: u32 = 32;
+pub const S_IRWXO: u32 = 7;
+pub const S_IXOTH: u32 = 1;
+pub const S_IWOTH: u32 = 2;
+pub const S_IROTH: u32 = 4;
+pub const F_OK: i32 = 0;
+pub const R_OK: i32 = 4;
+pub const W_OK: i32 = 2;
+pub const X_OK: i32 = 1;
+pub const STDIN_FILENO: i32 = 0;
+pub const STDOUT_FILENO: i32 = 1;
+pub const STDERR_FILENO: i32 = 2;
+pub const SIGHUP: i32 = 1;
+pub const SIGINT: i32 = 2;
+pub const SIGQUIT: i32 = 3;
+pub const SIGILL: i32 = 4;
+pub const SIGABRT: i32 = 6;
+pub const SIGFPE: i32 = 8;
+pub const SIGKILL: i32 = 9;
+pub const SIGSEGV: i32 = 11;
+pub const SIGPIPE: i32 = 13;
+pub const SIGALRM: i32 = 14;
+pub const SIGTERM: i32 = 15;
+
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
 #[derive(Debug)]
@@ -165,7 +204,6 @@ impl Filesystem for Ext4Fuse {
 
         match result {
             Ok(_) => {
-
                 log::info!("open success: {:x?}", file.inode);
                 let attr = FileAttr {
                     ino: file.inode as u64,
@@ -204,17 +242,11 @@ impl Filesystem for Ext4Fuse {
         let mode = inode_ref.inner.inode.mode;
         let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
         let file_type = match inode_type {
-            InodeMode::S_IFDIR => {
-                FileType::Directory
-            }
-            InodeMode::S_IFREG => {
-                FileType::RegularFile
-            }
+            InodeMode::S_IFDIR => FileType::Directory,
+            InodeMode::S_IFREG => FileType::RegularFile,
             /* Reset blocks array. For inode which is not directory or file, just
              * fill in blocks with 0 */
-            _ => {
-                FileType::RegularFile
-            }
+            _ => FileType::RegularFile,
         };
 
         let attr = FileAttr {
@@ -226,13 +258,13 @@ impl Filesystem for Ext4Fuse {
             ctime: UNIX_EPOCH,
             crtime: UNIX_EPOCH,
             kind: file_type, // Adjust according to inode type
-            perm: 0o777,               // Need a method to translate inode perms to Unix perms
+            perm: 0o777,     // Need a method to translate inode perms to Unix perms
             nlink: link_cnt,
             uid: 501,
             gid: 20,
             rdev: 0, // Device nodes not covered here
             flags: 0,
-            blksize: BLOCK_SIZE as u32, 
+            blksize: BLOCK_SIZE as u32,
         };
         reply.attr(&TTL, &attr);
     }
@@ -332,6 +364,68 @@ impl Filesystem for Ext4Fuse {
             }
         } else {
             reply.error(ENOENT);
+        }
+    }
+
+    /// Create file node.
+    /// Create a regular file, character device, block device, fifo or socket node.
+    fn mknod(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        rdev: u32,
+        reply: ReplyEntry,
+    ) {
+        let file_type = mode & S_IFMT as u32;
+
+        if file_type != S_IFREG as u32 && file_type != S_IFLNK as u32 && file_type != S_IFDIR as u32
+        {
+            log::warn!("mknod() implementation is incomplete. Only supports regular files, symlinks, and directories. Got {:o}", mode);
+            reply.error(ENOSPC);
+            return;
+        }
+
+        let actual_mode = mode & !umask;
+
+        let path = name.to_str().unwrap();
+
+        let mut ext4_file = Ext4File::new();
+        let r = self.ext4.ext4_open(&mut ext4_file, path, "w+", true);
+        match r {
+            Ok(_) => {
+                let attr = FileAttr {
+                    ino: ext4_file.inode as u64,
+                    size: 0,
+                    blocks: 0,
+                    atime: UNIX_EPOCH,
+                    mtime: UNIX_EPOCH,
+                    ctime: UNIX_EPOCH,
+                    crtime: UNIX_EPOCH,
+                    kind: match file_type {
+                        S_IFREG => FileType::RegularFile,
+                        S_IFCHR => FileType::CharDevice,
+                        S_IFBLK => FileType::BlockDevice,
+                        S_IFIFO => FileType::NamedPipe,
+                        S_IFSOCK => FileType::Socket,
+                        _ => FileType::RegularFile, // Default case, though it should never hit here
+                    },
+                    perm: actual_mode as u16,
+                    nlink: 1,
+                    uid: _req.uid(),
+                    gid: _req.gid(),
+                    rdev: rdev as u32,
+                    flags: 0,
+                    blksize: 4096,
+                };
+                reply.entry(&TTL, &attr, 0);
+            }
+
+            _ => {
+                reply.error(EIO);
+            }
         }
     }
 }
