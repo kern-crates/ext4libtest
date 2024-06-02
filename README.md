@@ -12,3 +12,15 @@
    ```bash
    sh run.sh
    ```
+
+## fuse example
+
+```sh
+sh fuser.sh
+```
+
+```sh
+# Run in another terminal.
+cd tmp
+ls
+```
