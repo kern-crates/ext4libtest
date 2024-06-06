@@ -16,6 +16,12 @@
 ## fuse example
 
 ```sh
+#env
+sudo apt install libfuse-dev pkg-config
+sudo apt install fuse3 libfuse3-dev
+```
+
+```sh
 sh fuser.sh
 ./ext4libtest foo
 ```
