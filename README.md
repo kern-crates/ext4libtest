@@ -30,6 +30,6 @@ sh fuser.sh
 # Run in another terminal.
 cd foo
 ls
-cd test_fiels
+cd test_files
 ls
 ```
