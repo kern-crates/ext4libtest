@@ -5,7 +5,8 @@
 ## 测试环境
 
 - WSL2 Ubuntu22.04
-- Rust 版本：`rustc 1.77.0-nightly (nightly-2023-12-28)`
+- Rust 版本：nightly-2024-06-01
+- rustc 1.80.0-nightly (ada5e2c7b 2024-05-31)
 
 ## fuse example
 
