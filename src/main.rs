@@ -171,13 +171,14 @@ struct Ext4Fuse {
 }
 
 impl Ext4Fuse {
-    pub fn new(ext4:Ext4) -> Self {
+    pub fn new(ext4: Ext4) -> Self {
         Self { ext4: ext4 }
     }
 }
 
 impl Filesystem for Ext4Fuse {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        // log::info!("lookup name {:?}", name);
         // fuse use 1 as root inode
         let parent = match parent {
             // root
@@ -224,6 +225,7 @@ impl Filesystem for Ext4Fuse {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
+        // log::info!("get attr {:x?}", ino);
         let inode = match ino {
             // root
             1 => 2,
@@ -456,6 +458,7 @@ impl Filesystem for Ext4Fuse {
         lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
+        log::info!("write {:?}", ino);
         let inode = match ino {
             // root
             1 => 2,
@@ -540,6 +543,69 @@ impl Filesystem for Ext4Fuse {
             Err(_) => {
                 reply.error(ENOENT);
             }
+        }
+    }
+
+    fn mkdir(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        umask: u32,
+        reply: ReplyEntry,
+    ) {
+
+        // log::info!("mkdir name {:?} mode {:x?}", name, mode);
+        let parent = match parent {
+            // root
+            1 => 2,
+            _ => parent,
+        };
+
+        let inode_ref = self.ext4.fuse_mkdir_with_attr(
+            parent,
+            name.to_str().unwrap(),
+            mode,
+            umask,
+            _req.uid(),
+            _req.gid(),
+        ).unwrap();
+
+        let inode_num = inode_ref.inode_num;
+        let attr = FileAttr {
+            ino: inode_num as u64,
+            size: 0,
+            blocks: 0,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
+            kind: FileType::Directory,
+            perm: 0o777,
+            nlink: 2,
+            uid: _req.uid(),
+            gid: _req.gid(),
+            rdev: 0 as u32,
+            flags: 0,
+            blksize: BLOCK_SIZE as u32,
+        };
+
+        reply.entry(&TTL, &attr, 0);
+    }
+
+    fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        // log::info!("remove dir {:?}", name);
+        let parent = match parent {
+            // root
+            1 => 2,
+            _ => parent,
+        };
+
+        let r = self.ext4.fuse_rmdir(parent, name.to_str().unwrap());
+        match r {
+            Ok(_) => reply.ok(),
+            Err(_) => reply.error(ENOENT),
         }
     }
 }

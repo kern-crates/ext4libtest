@@ -27,6 +27,9 @@ cd foo
 ls
 cd test_files
 ls
-touch foo
+touch test_file_create
+rm -rf test_file_create
+mkdir test_dir_mk
+rm -rf test_dir_mk
 cat 0.txt
 ```
