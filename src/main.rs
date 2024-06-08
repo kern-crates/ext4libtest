@@ -2,7 +2,6 @@ use ext4_rs::*;
 
 extern crate alloc;
 pub use alloc::sync::Arc;
-use clap::{crate_version, Arg, ArgAction, Command};
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
     ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow,
@@ -168,76 +167,60 @@ impl BlockDevice for Disk {
 }
 
 struct Ext4Fuse {
-    ext4: Arc<Ext4>,
+    ext4: Ext4,
 }
 
 impl Ext4Fuse {
-    pub fn new(ext4: Arc<Ext4>) -> Self {
+    pub fn new(ext4:Ext4) -> Self {
         Self { ext4: ext4 }
     }
 }
 
 impl Filesystem for Ext4Fuse {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-
-        let mut parent = parent;
         // fuse use 1 as root inode
-        if parent == 1{
-            //root
-            parent = 2;
-        }
-
-        let mut path = String::new();
-        path += name.to_str().unwrap();
-
-        
-        let mut file = Ext4File::new();
-        let result = self.ext4.ext4_open_from(parent as u32,&mut file, path.as_str(), "r", false);
-        // let result = self.ext4.ext4_open_new(&mut file, path.as_str(), "r", false);
-        log::info!("lookup parent {:x?} path {:?} result {:?}", parent, path, result);
-
-
-        let mut inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), file.inode as u32);
-        let mode = inode_ref.inner.inode.mode;
-        let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
-
-        let file_type = match inode_type {
-            InodeMode::S_IFDIR => {
-                FileType::Directory
-            }
-            InodeMode::S_IFREG => {
-                FileType::RegularFile
-            }
-            _ => {
-                FileType::RegularFile
-            }
+        let parent = match parent {
+            // root
+            1 => 2,
+            _ => parent,
         };
 
-        match result {
-            Ok(_) => {
-                log::info!("open success: {:x?}", file.inode);
-                let attr = FileAttr {
-                    ino: file.inode as u64,
-                    size: file.fsize,
-                    blocks: file.fsize / BLOCK_SIZE as u64,
-                    atime: UNIX_EPOCH,
-                    mtime: UNIX_EPOCH,
-                    ctime: UNIX_EPOCH,
-                    crtime: UNIX_EPOCH,
-                    // fix me
-                    kind: file_type,
-                    perm: 0o644,
-                    nlink: 1,
-                    uid: 501,
-                    gid: 20,
-                    rdev: 0,
-                    flags: 0,
-                    blksize: BLOCK_SIZE as u32,
-                };
-                reply.entry(&TTL, &attr, 0);
-            }
-            Err(_) => reply.error(ENOENT),
+        let r = self.ext4.fuse_lookup(parent, name.to_str().unwrap());
+
+        if r.is_err() {
+            reply.error(ENOENT);
+            return;
         }
+
+        let file_attr = r.unwrap();
+
+        let file_kind = match file_attr.kind {
+            InodeFileType::S_IFREG => FileType::RegularFile,
+            InodeFileType::S_IFDIR => FileType::Directory,
+            _ => FileType::RegularFile,
+        };
+
+        let file_perm = file_attr.perm.bits();
+
+        let attr = FileAttr {
+            ino: file_attr.ino as u64,
+            size: file_attr.size,
+            blocks: file_attr.blocks,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
+            kind: file_kind,
+            perm: file_perm,
+            nlink: file_attr.nlink,
+            uid: file_attr.uid,
+            gid: file_attr.gid,
+            rdev: 0,
+            flags: 0,
+            blksize: BLOCK_SIZE as u32,
+        };
+
+        reply.entry(&TTL, &attr, 0);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
@@ -247,36 +230,41 @@ impl Filesystem for Ext4Fuse {
             _ => ino,
         };
 
-        log::info!("getattr: {:x?}", inode);
-        let mut inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), inode as u32);
-        let link_cnt = inode_ref.inner.inode.ext4_inode_get_links_cnt() as u32;
-        let mode = inode_ref.inner.inode.mode;
-        let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
-        let file_type = match inode_type {
-            InodeMode::S_IFDIR => FileType::Directory,
-            InodeMode::S_IFREG => FileType::RegularFile,
-            /* Reset blocks array. For inode which is not directory or file, just
-             * fill in blocks with 0 */
+        let r = self.ext4.fuse_getattr(inode);
+
+        if r.is_err() {
+            reply.error(ENOENT);
+            return;
+        }
+
+        let file_attr = r.unwrap();
+
+        let file_kind = match file_attr.kind {
+            InodeFileType::S_IFREG => FileType::RegularFile,
+            InodeFileType::S_IFDIR => FileType::Directory,
             _ => FileType::RegularFile,
         };
 
+        let file_perm = file_attr.perm.bits();
+
         let attr = FileAttr {
-            ino: inode,
-            size: inode_ref.inner.inode.inode_get_size() as u64,
-            blocks: inode_ref.inner.inode.inode_get_size() / BLOCK_SIZE as u64,
-            atime: UNIX_EPOCH, // Example static time, adjust accordingly
+            ino: file_attr.ino as u64,
+            size: file_attr.size,
+            blocks: file_attr.blocks,
+            atime: UNIX_EPOCH,
             mtime: UNIX_EPOCH,
             ctime: UNIX_EPOCH,
             crtime: UNIX_EPOCH,
-            kind: file_type, // Adjust according to inode type
-            perm: 0o777,     // Need a method to translate inode perms to Unix perms
-            nlink: link_cnt,
-            uid: 501,
-            gid: 20,
-            rdev: 0, // Device nodes not covered here
+            kind: file_kind,
+            perm: file_perm,
+            nlink: file_attr.nlink,
+            uid: file_attr.uid,
+            gid: file_attr.gid,
+            rdev: 0,
             flags: 0,
             blksize: BLOCK_SIZE as u32,
         };
+
         reply.attr(&TTL, &attr);
     }
 
@@ -298,47 +286,101 @@ impl Filesystem for Ext4Fuse {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
-        let attrs = InodeAttr {
+        let inode = match inode {
+            // root
+            1 => 2,
+            _ => inode,
+        };
+
+        let now = system_time_to_secs(SystemTime::now());
+
+        let mut atime_secs = None;
+        if let Some(atime) = atime {
+            let secs = match atime {
+                TimeOrNow::SpecificTime(t) => system_time_to_secs(t),
+                TimeOrNow::Now => now,
+            };
+            atime_secs = Some(secs);
+        }
+
+        let mut mtime_secs = None;
+        if let Some(mtime) = mtime {
+            let secs = match mtime {
+                TimeOrNow::SpecificTime(t) => system_time_to_secs(t),
+                TimeOrNow::Now => now,
+            };
+            mtime_secs = Some(secs);
+        }
+
+        let mut ctime_secs = None;
+        if let Some(ctime) = ctime {
+            let secs = system_time_to_secs(ctime);
+            ctime_secs = Some(secs);
+        }
+
+        let mut crtime_secs = None;
+        if let Some(crtime) = crtime {
+            let secs = system_time_to_secs(crtime);
+            crtime_secs = Some(secs);
+        }
+
+        let mut chgtime_secs = None;
+        if let Some(chgtime) = chgtime {
+            let secs = system_time_to_secs(chgtime);
+            chgtime_secs = Some(secs);
+        }
+
+        let mut bkuptime_secs = None;
+        if let Some(bkuptime) = bkuptime {
+            let secs = system_time_to_secs(bkuptime);
+            bkuptime_secs = Some(secs);
+        }
+
+        self.ext4.fuse_setattr(
+            inode,
             mode,
             uid,
             gid,
             size,
-            atime,
-            mtime,
-            ctime,
-            crtime,
-            chgtime,
-            bkuptime,
+            atime_secs,
+            mtime_secs,
+            ctime_secs,
+            fh,
+            crtime_secs,
+            chgtime_secs,
+            bkuptime_secs,
             flags,
-        };
+        );
 
-        self.set_attr(inode as u32, &attrs);
+        let r = self.ext4.fuse_getattr(inode);
+        if r.is_err() {
+            reply.error(EIO);
+            return;
+        }
+        let file_attr = r.unwrap();
 
-        // 获取 inode 的引用以准备响应
-        let inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), inode as u32);
-
-        let mode = inode_ref.inner.inode.mode;
-        let inode_type = InodeMode::from_bits(mode & EXT4_INODE_MODE_TYPE_MASK as u16).unwrap();
-        let file_type = match inode_type {
-            InodeMode::S_IFDIR => FileType::Directory,
-            InodeMode::S_IFREG => FileType::RegularFile,
+        let file_kind = match file_attr.kind {
+            InodeFileType::S_IFREG => FileType::RegularFile,
+            InodeFileType::S_IFDIR => FileType::Directory,
             _ => FileType::RegularFile,
         };
 
+        let file_perm = file_attr.perm.bits();
+
         let response_attr = FileAttr {
-            ino: inode,
-            size: inode_ref.inner.inode.inode_get_size(),
-            blocks: inode_ref.inner.inode.ext4_inode_get_blocks_count(),
-            atime: timestamp_to_system_time(inode_ref.inner.inode.ext4_inode_get_atime()),
-            mtime: timestamp_to_system_time(inode_ref.inner.inode.ext4_inode_get_mtime()),
-            ctime: timestamp_to_system_time(inode_ref.inner.inode.ext4_inode_get_ctime()),
-            crtime: timestamp_to_system_time(inode_ref.inner.inode.ext4_inode_get_crtime()),
-            kind: file_type,
-            perm: inode_ref.inner.inode.ext4_get_inode_mode() & 0o777,
-            nlink: inode_ref.inner.inode.ext4_inode_get_links_cnt() as u32,
-            uid: inode_ref.inner.inode.uid as u32,
-            gid: inode_ref.inner.inode.gid as u32,
-            rdev: 0, // 设备节点处理
+            ino: file_attr.ino as u64,
+            size: file_attr.size,
+            blocks: file_attr.blocks,
+            atime: timestamp_to_system_time(file_attr.atime),
+            mtime: timestamp_to_system_time(file_attr.mtime),
+            ctime: timestamp_to_system_time(file_attr.ctime),
+            crtime: timestamp_to_system_time(file_attr.crtime),
+            kind: file_kind,
+            perm: file_perm,
+            nlink: file_attr.nlink,
+            uid: file_attr.uid,
+            gid: file_attr.gid,
+            rdev: 0,
             flags: 0,
             blksize: BLOCK_SIZE as u32,
         };
@@ -350,27 +392,22 @@ impl Filesystem for Ext4Fuse {
         &mut self,
         _req: &Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
         size: u32,
-        _flags: i32,
-        _lock: Option<u64>,
+        flags: i32,
+        lock: Option<u64>,
         reply: ReplyData,
     ) {
-        log::info!("-----------read-----------");
-        let mut file = Ext4File::new();
-        file.inode = ino as u32;
-        file.fpos = offset as usize;
-
-        let mut data = vec![0u8; size as usize];
-        let mut read_cnt = 0;
-        let result = self
-            .ext4
-            .ext4_file_read(&mut file, &mut data, size as usize, &mut read_cnt);
-
-        match result {
-            Ok(_) => reply.data(&data),
-            Err(_) => reply.error(ENOENT), // Adjust error handling as needed
+        let inode = match ino {
+            // root
+            1 => 2,
+            _ => ino,
+        };
+        let r = self.ext4.fuse_read(inode, fh, offset, size, flags, lock);
+        match r {
+            Ok(data) => reply.data(&data),
+            Err(_) => reply.error(ENOENT),
         }
     }
 
@@ -378,7 +415,7 @@ impl Filesystem for Ext4Fuse {
         &mut self,
         _req: &Request,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
@@ -387,19 +424,24 @@ impl Filesystem for Ext4Fuse {
             1 => 2,
             _ => ino,
         };
-        // log::info!("-----------readdir-----------inode {:x?}", ino);
-        let entries = self.ext4.read_dir_entry(inode);
-        for (i, entry) in entries.iter().enumerate().skip(offset as usize) {
-            let name = get_name(entry.name, entry.name_len as usize).unwrap();
-            let detype = entry.get_de_type();
-            let kind = match detype {
-                1 => FileType::RegularFile,
-                2 => FileType::Directory,
-                _ => FileType::RegularFile,
-            };
-            reply.add(entry.inode as u64, (i + 1) as i64, kind, &name);
+
+        let r = self.ext4.fuse_readdir(inode, fh, offset);
+        match r {
+            Ok(entries) => {
+                for (i, entry) in entries.iter().enumerate().skip(offset as usize) {
+                    let name = entry.get_name();
+                    let detype = entry.get_de_type();
+                    let kind = match detype {
+                        1 => FileType::RegularFile,
+                        2 => FileType::Directory,
+                        _ => FileType::RegularFile,
+                    };
+                    reply.add(entry.inode as u64, (i + 1) as i64, kind, &name);
+                }
+                reply.ok();
+            }
+            Err(_) => reply.error(ENOENT),
         }
-        reply.ok();
     }
 
     fn write(
@@ -414,33 +456,33 @@ impl Filesystem for Ext4Fuse {
         lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        let mut file = Ext4File::new();
-        file.inode = ino as u32;
-        file.fpos = offset as usize;
+        let inode = match ino {
+            // root
+            1 => 2,
+            _ => ino,
+        };
 
-        self.ext4.ext4_file_write(&mut file, data, data.len());
-        reply.written(data.len() as u32)
+        let r = self
+            .ext4
+            .fuse_write(inode, fh, offset, data, write_flags, flags, lock_owner);
+        match r {
+            Ok(size) => reply.written(size as u32),
+            Err(_) => reply.error(ENOENT),
+        }
     }
 
     /// Remove a file.
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        let path = name.to_str().unwrap_or_default();
-        let mut parent_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), parent as u32);
-        let mut child = Ext4File::new();
-        let open_result = self.ext4.ext4_open(&mut child, path, "r", false);
+        let parent = match parent {
+            // root
+            1 => 2,
+            _ => parent,
+        };
 
-        if let Ok(_) = open_result {
-            let mut child_ref =
-                Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), child.inode);
-            let result =
-                self.ext4
-                    .ext4_unlink(&mut parent_ref, &mut child_ref, path, path.len() as u32);
-            match result {
-                EOK => reply.ok(),
-                _ => reply.error(EIO),
-            }
-        } else {
-            reply.error(ENOENT);
+        let r = self.ext4.fuse_unlink(parent, name.to_str().unwrap());
+        match r {
+            Ok(_) => reply.ok(),
+            Err(_) => reply.error(ENOENT),
         }
     }
 
@@ -456,52 +498,47 @@ impl Filesystem for Ext4Fuse {
         rdev: u32,
         reply: ReplyEntry,
     ) {
-        let file_type = mode & S_IFMT as u32;
+        let parent = match parent {
+            // root
+            1 => 2,
+            _ => parent,
+        };
 
-        if file_type != S_IFREG as u32 && file_type != S_IFLNK as u32 && file_type != S_IFDIR as u32
-        {
-            log::warn!("mknod() implementation is incomplete. Only supports regular files, symlinks, and directories. Got {:o}", mode);
-            reply.error(ENOSPC);
-            return;
-        }
+        let r = self.ext4.fuse_mknod_with_attr(
+            parent,
+            name.to_str().unwrap(),
+            mode,
+            umask,
+            rdev,
+            _req.uid(),
+            _req.gid(),
+        );
 
-        let actual_mode = mode & !umask;
-
-        let path = name.to_str().unwrap();
-
-        let mut ext4_file = Ext4File::new();
-        let r = self.ext4.ext4_open(&mut ext4_file, path, "w+", true);
         match r {
-            Ok(_) => {
+            Ok(inode_ref) => {
+                let inode_num = inode_ref.inode_num;
                 let attr = FileAttr {
-                    ino: ext4_file.inode as u64,
+                    ino: inode_num as u64,
                     size: 0,
                     blocks: 0,
                     atime: UNIX_EPOCH,
                     mtime: UNIX_EPOCH,
                     ctime: UNIX_EPOCH,
                     crtime: UNIX_EPOCH,
-                    kind: match file_type {
-                        S_IFREG => FileType::RegularFile,
-                        S_IFCHR => FileType::CharDevice,
-                        S_IFBLK => FileType::BlockDevice,
-                        S_IFIFO => FileType::NamedPipe,
-                        S_IFSOCK => FileType::Socket,
-                        _ => FileType::RegularFile, // Default case, though it should never hit here
-                    },
-                    perm: actual_mode as u16,
+                    kind: FileType::RegularFile,
+                    perm: inode_ref.inode.file_perm().bits(),
                     nlink: 1,
                     uid: _req.uid(),
                     gid: _req.gid(),
                     rdev: rdev as u32,
                     flags: 0,
-                    blksize: 4096,
+                    blksize: BLOCK_SIZE as u32,
                 };
+
                 reply.entry(&TTL, &attr, 0);
             }
-
-            _ => {
-                reply.error(EIO);
+            Err(_) => {
+                reply.error(ENOENT);
             }
         }
     }
@@ -545,67 +582,7 @@ fn system_time_to_secs(time: SystemTime) -> u32 {
         .unwrap_or(Duration::from_secs(0))
         .as_secs() as u32
 }
-
-pub struct InodeAttr {
-    mode: Option<u32>,
-    uid: Option<u32>,
-    gid: Option<u32>,
-    size: Option<u64>,
-    atime: Option<TimeOrNow>,
-    mtime: Option<TimeOrNow>,
-    ctime: Option<SystemTime>,
-    crtime: Option<SystemTime>,
-    chgtime: Option<SystemTime>,
-    bkuptime: Option<SystemTime>,
-    flags: Option<u32>,
-}
-impl Ext4Fuse {
-    pub fn set_attr(&self, inode: u32, attr: &InodeAttr) {
-        let mut inode_ref = Ext4InodeRef::get_inode_ref(self.ext4.self_ref.clone(), inode);
-
-        let now = system_time_to_secs(SystemTime::now());
-
-        if let Some(mode) = attr.mode {
-            inode_ref.inner.inode.ext4_inode_set_mode(mode as u16);
-        }
-        if let Some(uid) = attr.uid {
-            inode_ref.inner.inode.ext4_inode_set_uid(uid as u16);
-        }
-        if let Some(gid) = attr.gid {
-            inode_ref.inner.inode.ext4_inode_set_gid(gid as u16);
-        }
-        if let Some(size) = attr.size {
-            inode_ref.inner.inode.ext4_inode_set_size(size);
-        }
-        if let Some(atime) = &attr.atime {
-            let secs = match atime {
-                TimeOrNow::SpecificTime(t) => system_time_to_secs(*t),
-                TimeOrNow::Now => now,
-            };
-            inode_ref.inner.inode.ext4_inode_set_atime(secs);
-        }
-        if let Some(mtime) = &attr.mtime {
-            let secs = match mtime {
-                TimeOrNow::SpecificTime(t) => system_time_to_secs(*t),
-                TimeOrNow::Now => now,
-            };
-            inode_ref.inner.inode.ext4_inode_set_mtime(secs);
-        }
-        if let Some(ctime) = attr.ctime {
-            let secs = system_time_to_secs(ctime);
-            inode_ref.inner.inode.ext4_inode_set_ctime(secs);
-        }
-        if let Some(crtime) = attr.crtime {
-            let secs = system_time_to_secs(crtime);
-            inode_ref.inner.inode.ext4_inode_set_crtime(secs);
-        }
-        if let Some(flags) = attr.flags {
-            inode_ref.inner.inode.ext4_inode_set_flags(flags);
-        }
-
-        inode_ref.write_back_inode();
-    }
-}
+use std::env;
 
 fn main() {
     log::set_logger(&SimpleLogger).unwrap();
@@ -614,7 +591,13 @@ fn main() {
     let disk = Arc::new(Disk {});
     let ext4 = Ext4::open(disk);
     let ext4_fuse = Ext4Fuse::new(ext4);
-    let mountpoint = "/root/sync/ext4libtest/foo/";
+
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        panic!("No mount point specified!");
+    }
+    let mountpoint = &args[1];
+
     let mut options = vec![
         MountOption::RW,
         MountOption::FSName("ext4_test".to_string()),

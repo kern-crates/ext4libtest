@@ -7,12 +7,6 @@
 - WSL2 Ubuntu22.04
 - Rust 版本：`rustc 1.77.0-nightly (nightly-2023-12-28)`
 
-## 运行
-
-   ```bash
-   sh run.sh
-   ```
-
 ## fuse example
 
 ```sh
@@ -22,8 +16,9 @@ sudo apt install fuse3 libfuse3-dev
 ```
 
 ```sh
-sh fuser.sh
-./ext4libtest foo
+sh gen_img.sh
+#cargo run /path/to/mountpoint
+cargo run ./foo/
 ```
 
 ```sh
@@ -32,4 +27,6 @@ cd foo
 ls
 cd test_files
 ls
+touch foo
+cat 0.txt
 ```
