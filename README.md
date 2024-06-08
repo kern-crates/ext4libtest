@@ -31,5 +31,7 @@ touch test_file_create
 rm -rf test_file_create
 mkdir test_dir_mk
 rm -rf test_dir_mk
+echo "AAAAAAAA" > test_write
+cat test_write
 cat 0.txt
 ```
