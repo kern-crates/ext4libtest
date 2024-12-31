@@ -28,8 +28,8 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "ext4_rs"
-version = "1.0.0"
-source = "git+https://github.com/yuoo655/ext4_rs.git?rev=d8b2336#d8b2336d9d9a004455a9083ec0fe9eb22f9fe65c"
+version = "1.1.0"
+source = "git+https://github.com/yuoo655/ext4_rs.git#7aa7536b8ec0f8ff5c2006e8fedef16d25d8f0a6"
 dependencies = [
  "bitflags",
  "log",
