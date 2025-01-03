@@ -555,7 +555,6 @@ impl Filesystem for Ext4Fuse {
         umask: u32,
         reply: ReplyEntry,
     ) {
-
         // log::info!("mkdir name {:?} mode {:x?}", name, mode);
         let parent = match parent {
             // root
@@ -563,14 +562,17 @@ impl Filesystem for Ext4Fuse {
             _ => parent,
         };
 
-        let inode_ref = self.ext4.fuse_mkdir_with_attr(
-            parent,
-            name.to_str().unwrap(),
-            mode,
-            umask,
-            _req.uid(),
-            _req.gid(),
-        ).unwrap();
+        let inode_ref = self
+            .ext4
+            .fuse_mkdir_with_attr(
+                parent,
+                name.to_str().unwrap(),
+                mode,
+                umask,
+                _req.uid(),
+                _req.gid(),
+            )
+            .unwrap();
 
         let inode_num = inode_ref.inode_num;
         let attr = FileAttr {
@@ -673,3 +675,6 @@ fn main() {
     options.push(MountOption::AllowRoot);
     fuser::mount2(ext4_fuse, mountpoint, &options).unwrap();
 }
+
+#[cfg(test)]
+mod tests;
