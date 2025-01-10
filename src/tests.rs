@@ -25,64 +25,56 @@ fn test_open() {
     assert!(r.is_err());
 }
 
-// #[test]
-// fn test_read_file() {
+#[test]
+fn test_file_write_and_read_random_data() {
+    let disk = Arc::new(Disk {});
+    let ext4 = Ext4::open(disk);
 
-//     let disk = Arc::new(Disk {});
-//     let ext4 = Ext4::open(disk);
+    use rand::Rng;
+    
+    // 创建一个 1GB 的文件并写入随机数据
+    const FILE_SIZE: usize = 1 * 1024 * 1024 * 1024; // 1G
+    let path = "large_file_random.txt";
+    let flags = "w+";
+    let inode_num = ext4.ext4_file_open(path, flags).unwrap();
+    
+    let mut rng = rand::thread_rng();
+    
+    // 写入和验证逐块数据
+    for i in 0..(FILE_SIZE / BLOCK_SIZE) {
+        // 生成随机数据
+        let mut write_data = vec![0u8; BLOCK_SIZE];
+        rng.fill(&mut write_data[..]);
+    
+        // 计算偏移量
+        let offset = (i * BLOCK_SIZE) as i64;
+    
+        // 写入数据
+        let write_size = ext4
+            .ext4_file_write(inode_num as u64, offset, &write_data)
+            .unwrap();
+        assert_eq!(
+            write_size, BLOCK_SIZE,
+            "Failed to write block at offset {} (expected {} bytes, got {})",
+            offset, BLOCK_SIZE, write_size
+        );
+    
+        // 读取数据
+        let read_data = ext4
+            .ext4_file_read(inode_num as u64, BLOCK_SIZE as u32, offset)
+            .unwrap();
+        assert_eq!(
+            read_data, write_data,
+            "Data mismatch at block {:x} (offset {:x}).",
+            i, offset
+        );
+    
+        if i % 1024 == 0 {
+            log::info!(
+                "Verified {:?} MB written and read back successfully",
+                i * 4 / 1024
+            );
+        }
+    }
+}
 
-//     // Test reading the file in ext4_rs
-//     let file_path_str = "test_files/1.txt";
-//     let mut ext4_file = Ext4File::new();
-//     let r = ext4.ext4_open(&mut ext4_file, file_path_str, "r+", false);
-//     assert!(r.is_ok(), "open file error {:?}", r.err());
-
-//     let mut read_buf = vec![0u8; 0x100000];
-//     let mut read_cnt = 0;
-//     let r = ext4.ext4_file_read(&mut ext4_file, &mut read_buf, 0x100000, &mut read_cnt);
-//     assert!(r.is_ok(), "open file error {:?}", r.err());
-//     let data = [0x31u8; 0x100000];
-//     assert!(read_buf == data);
-
-// }
-
-// #[test]
-// fn test_write_file() {
-
-//     let disk = Arc::new(Disk {});
-//     let ext4 = Ext4::open(disk);
-
-//     // dir
-//     log::info!("----mkdir----");
-//     for i in 0..10 {
-//         let path = format!("dirtest{}", i);
-//         let path = path.as_str();
-//         let r = ext4.ext4_dir_mk(&path);
-//         assert!(r.is_ok(), "dir make error {:?}", r.err());
-//     }
-
-//     // write test
-//     // file
-//     log::info!("----write file in dir----");
-//     for i in 0..10 {
-//         const WRITE_SIZE: usize = 0x400000;
-//         let path = format!("dirtest{}/write_{}.txt", i, i);
-//         let path = path.as_str();
-//         let mut ext4_file = Ext4File::new();
-//         let r = ext4.ext4_open(&mut ext4_file, path, "w+", true);
-//         assert!(r.is_ok(), "open file error {:?}", r.err());
-
-//         let write_data = vec![0x41 + i as u8; WRITE_SIZE];
-//         ext4.ext4_file_write(&mut ext4_file, &write_data, WRITE_SIZE);
-
-//         // test
-//         let r = ext4.ext4_open(&mut ext4_file, path, "r+", false);
-//         assert!(r.is_ok(), "open file error {:?}", r.err());
-
-//         let mut read_buf = vec![0u8; WRITE_SIZE];
-//         let mut read_cnt = 0;
-//         let r = ext4.ext4_file_read(&mut ext4_file, &mut read_buf, WRITE_SIZE, &mut read_cnt);
-//         assert!(r.is_ok(), "open file error {:?}", r.err());
-//         assert_eq!(write_data, read_buf);
-//     }
-// }
