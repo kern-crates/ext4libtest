@@ -24,7 +24,7 @@ struct SimpleLogger;
 
 impl log::Log for SimpleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
+        metadata.level() <= Level::Debug
     }
 
     fn log(&self, record: &Record) {
@@ -140,7 +140,7 @@ pub struct Disk {}
 
 impl BlockDevice for Disk {
     fn read_offset(&self, offset: usize) -> Vec<u8> {
-        // log::info!("read_offset: {:x?}", offset);
+        // log::debug!("disk read_offset: {:x} ({})", offset, offset);
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -154,6 +154,7 @@ impl BlockDevice for Disk {
     }
 
     fn write_offset(&self, offset: usize, data: &[u8]) {
+        // log::debug!("disk write_offset: {:x} ({}), data_len: {}", offset, offset, data.len());
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -177,7 +178,7 @@ impl Ext4Fuse {
 
 impl Filesystem for Ext4Fuse {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        // log::info!("lookup name {:?}", name);
+        log::info!("lookup parent: {}, name: {:?}", parent, name);
         // fuse use 1 as root inode
         let parent = match parent {
             // root
@@ -188,11 +189,13 @@ impl Filesystem for Ext4Fuse {
         let r = self.ext4.fuse_lookup(parent, name.to_str().unwrap());
 
         if r.is_err() {
+            log::warn!("lookup failed for name {:?} in parent {}: {:?}", name, parent, r.err());
             reply.error(ENOENT);
             return;
         }
 
         let file_attr = r.unwrap();
+        log::info!("lookup successful: ino={}, size={}, kind={:?}", file_attr.ino, file_attr.size, file_attr.kind);
 
         let file_kind = match file_attr.kind {
             InodeFileType::S_IFREG => FileType::RegularFile,
@@ -224,7 +227,7 @@ impl Filesystem for Ext4Fuse {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
-        // log::info!("get attr {:x?}", ino);
+        log::info!("getattr ino: {}, fh: {:?}", ino, _fh);
         let inode = match ino {
             // root
             1 => 2,
@@ -234,11 +237,13 @@ impl Filesystem for Ext4Fuse {
         let r = self.ext4.fuse_getattr(inode);
 
         if r.is_err() {
+            log::warn!("getattr failed for ino {}: {:?}", ino, r.err());
             reply.error(ENOENT);
             return;
         }
 
         let file_attr = r.unwrap();
+        log::info!("getattr successful: ino={}, size={}, kind={:?}", file_attr.ino, file_attr.size, file_attr.kind);
 
         let file_kind = match file_attr.kind {
             InodeFileType::S_IFREG => FileType::RegularFile,
@@ -287,6 +292,8 @@ impl Filesystem for Ext4Fuse {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
+        log::info!("setattr ino: {}, mode: {:?}, uid: {:?}, gid: {:?}, size: {:?}", 
+                   inode, mode, uid, gid, size);
         let inode = match inode {
             // root
             1 => 2,
@@ -355,6 +362,7 @@ impl Filesystem for Ext4Fuse {
 
         let r = self.ext4.fuse_getattr(inode);
         if r.is_err() {
+            log::error!("setattr: getattr failed after setattr for ino {}: {:?}", inode, r.err());
             reply.error(EIO);
             return;
         }
@@ -386,6 +394,7 @@ impl Filesystem for Ext4Fuse {
             blksize: BLOCK_SIZE as u32,
         };
 
+        log::info!("setattr successful for ino {}", inode);
         reply.attr(&Duration::from_secs(1), &response_attr); // 缓存时间可调整
     }
 
@@ -400,6 +409,8 @@ impl Filesystem for Ext4Fuse {
         lock: Option<u64>,
         reply: ReplyData,
     ) {
+        log::info!("read ino: {}, fh: {}, offset: {}, size: {}, flags: {}", 
+                   ino, fh, offset, size, flags);
         let inode = match ino {
             // root
             1 => 2,
@@ -407,8 +418,14 @@ impl Filesystem for Ext4Fuse {
         };
         let r = self.ext4.fuse_read(inode, fh, offset, size, flags, lock);
         match r {
-            Ok(data) => reply.data(&data),
-            Err(_) => reply.error(ENOENT),
+            Ok(data) => {
+                log::info!("read successful: {} bytes returned", data.len());
+                reply.data(&data)
+            },
+            Err(e) => {
+                log::warn!("read failed for ino {}: {:?}", ino, e);
+                reply.error(ENOENT)
+            },
         }
     }
 
@@ -420,6 +437,7 @@ impl Filesystem for Ext4Fuse {
         offset: i64,
         mut reply: ReplyDirectory,
     ) {
+        log::info!("readdir ino: {}, fh: {}, offset: {}", ino, fh, offset);
         let inode = match ino {
             // root
             1 => 2,
@@ -429,6 +447,7 @@ impl Filesystem for Ext4Fuse {
         let r = self.ext4.fuse_readdir(inode, fh, offset);
         match r {
             Ok(entries) => {
+                log::info!("readdir found {} entries", entries.len());
                 for (i, entry) in entries.iter().enumerate().skip(offset as usize) {
                     let name = entry.get_name();
                     let detype = entry.get_de_type();
@@ -437,11 +456,15 @@ impl Filesystem for Ext4Fuse {
                         2 => FileType::Directory,
                         _ => FileType::RegularFile,
                     };
+                    log::debug!("readdir entry: name={}, inode={}, type={}", name, entry.inode, detype);
                     let _ = reply.add(entry.inode as u64, (i + 1) as i64, kind, &name);
                 }
                 reply.ok();
             }
-            Err(_) => reply.error(ENOENT),
+            Err(e) => {
+                log::warn!("readdir failed for ino {}: {:?}", ino, e);
+                reply.error(ENOENT)
+            },
         }
     }
 
@@ -457,7 +480,8 @@ impl Filesystem for Ext4Fuse {
         lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
-        log::info!("write {:?}", ino);
+        log::info!("write ino: {}, fh: {}, offset: {}, data_len: {}, write_flags: {}, flags: {}", 
+                   ino, fh, offset, data.len(), write_flags, flags);
         let inode = match ino {
             // root
             1 => 2,
@@ -468,13 +492,20 @@ impl Filesystem for Ext4Fuse {
             .ext4
             .fuse_write(inode, fh, offset, data, write_flags, flags, lock_owner);
         match r {
-            Ok(size) => reply.written(size as u32),
-            Err(_) => reply.error(ENOENT),
+            Ok(size) => {
+                log::info!("write successful: {} bytes written", size);
+                reply.written(size as u32)
+            },
+            Err(e) => {
+                log::warn!("write failed for ino {}: {:?}", ino, e);
+                reply.error(ENOENT)
+            },
         }
     }
 
     /// Remove a file.
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        log::info!("unlink parent: {}, name: {:?}", parent, name);
         let parent = match parent {
             // root
             1 => 2,
@@ -483,8 +514,14 @@ impl Filesystem for Ext4Fuse {
 
         let r = self.ext4.fuse_unlink(parent, name.to_str().unwrap());
         match r {
-            Ok(_) => reply.ok(),
-            Err(_) => reply.error(ENOENT),
+            Ok(_) => {
+                log::info!("unlink successful for {:?}", name);
+                reply.ok()
+            },
+            Err(e) => {
+                log::warn!("unlink failed for {:?}: {:?}", name, e);
+                reply.error(ENOENT)
+            },
         }
     }
 
@@ -500,6 +537,8 @@ impl Filesystem for Ext4Fuse {
         rdev: u32,
         reply: ReplyEntry,
     ) {
+        log::info!("mknod parent: {}, name: {:?}, mode: {:o}, umask: {:o}, rdev: {}", 
+                   parent, name, mode, umask, rdev);
         let parent = match parent {
             // root
             1 => 2,
@@ -519,6 +558,7 @@ impl Filesystem for Ext4Fuse {
         match r {
             Ok(inode_ref) => {
                 let inode_num = inode_ref.inode_num;
+                log::info!("mknod successful: created inode {}", inode_num);
                 let attr = FileAttr {
                     ino: inode_num as u64,
                     size: 0,
@@ -539,7 +579,8 @@ impl Filesystem for Ext4Fuse {
 
                 reply.entry(&TTL, &attr, 0);
             }
-            Err(_) => {
+            Err(e) => {
+                log::warn!("mknod failed for {:?}: {:?}", name, e);
                 reply.error(ENOENT);
             }
         }
@@ -554,7 +595,7 @@ impl Filesystem for Ext4Fuse {
         umask: u32,
         reply: ReplyEntry,
     ) {
-        // log::info!("mkdir name {:?} mode {:x?}", name, mode);
+        log::info!("mkdir parent: {}, name: {:?}, mode: {:o}, umask: {:o}", parent, name, mode, umask);
         let parent = match parent {
             // root
             1 => 2,
@@ -574,6 +615,7 @@ impl Filesystem for Ext4Fuse {
             .unwrap();
 
         let inode_num = inode_ref.inode_num;
+        log::info!("mkdir successful: created directory inode {}", inode_num);
         let attr = FileAttr {
             ino: inode_num as u64,
             size: 0,
@@ -596,7 +638,7 @@ impl Filesystem for Ext4Fuse {
     }
 
     fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
-        // log::info!("remove dir {:?}", name);
+        log::info!("rmdir parent: {}, name: {:?}", parent, name);
         let parent = match parent {
             // root
             1 => 2,
@@ -605,8 +647,14 @@ impl Filesystem for Ext4Fuse {
 
         let r = self.ext4.fuse_rmdir(parent, name.to_str().unwrap());
         match r {
-            Ok(_) => reply.ok(),
-            Err(_) => reply.error(ENOENT),
+            Ok(_) => {
+                log::info!("rmdir successful for {:?}", name);
+                reply.ok()
+            },
+            Err(e) => {
+                log::warn!("rmdir failed for {:?}: {:?}", name, e);
+                reply.error(ENOENT)
+            },
         }
     }
 }
@@ -653,17 +701,25 @@ use std::env;
 
 fn main() {
     log::set_logger(&SimpleLogger).unwrap();
-    log::set_max_level(LevelFilter::Info);
+    log::set_max_level(LevelFilter::Debug);
+    
+    log::info!("Starting EXT4 FUSE filesystem");
 
     let disk = Arc::new(Disk {});
+    log::info!("Created disk device for ex4.img");
+    
     let ext4 = Ext4::open(disk);
+    log::info!("Opened EXT4 filesystem");
+    
     let ext4_fuse = Ext4Fuse::new(ext4);
+    // log::info!("Created FUSE filesystem wrapper");
 
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         panic!("No mount point specified!");
     }
     let mountpoint = &args[1];
+    // log::info!("Mount point: {}", mountpoint);
 
     let mut options = vec![
         MountOption::RW,
@@ -672,7 +728,13 @@ fn main() {
 
     options.push(MountOption::AutoUnmount);
     options.push(MountOption::AllowRoot);
+    
+    log::info!("Mount options: RW, FSName=ext4_test, AutoUnmount, AllowRoot");
+    log::info!("Mounting filesystem at {}", mountpoint);
+    
     fuser::mount2(ext4_fuse, mountpoint, &options).unwrap();
+    
+    log::info!("Filesystem mounted successfully");
 }
 
 #[cfg(test)]
